@@ -25,13 +25,28 @@ def load_whisper():
     return whisper.load_model("tiny")
 
 def download_video(url, folder):
-    opts={"format":"best[height<=720]/best","outtmpl":str(Path(folder)/"source.%(ext)s"),"noplaylist":True,"quiet":True,"no_warnings":True}
+    # Prefer separate video/audio streams and merge; fall back to progressive formats.
+    opts={
+        "format":"bv*[height<=720]+ba/b[height<=720]/b",
+        "outtmpl":str(Path(folder)/"source.%(ext)s"),
+        "merge_output_format":"mp4",
+        "noplaylist":True,
+        "quiet":True,
+        "no_warnings":True,
+        "retries":3,
+        "fragment_retries":3,
+    }
     with YoutubeDL(opts) as ydl:
         info=ydl.extract_info(url,download=True)
-        path=ydl.prepare_filename(info)
-    if not os.path.isfile(path):
-        raise RuntimeError("Downloaded video file could not be located.")
-    return path,info
+        expected=ydl.prepare_filename(info)
+    # Account for postprocessor changing the extension after stream merge.
+    candidates=[p for p in Path(folder).glob("source.*") if p.suffix.lower() in {".mp4",".mkv",".webm",".mov"}]
+    if not candidates:
+        raise RuntimeError("Download finished but no video file was found. This video may have unavailable formats.")
+    path=max(candidates,key=lambda p:p.stat().st_size)
+    if path.stat().st_size<=0:
+        raise RuntimeError("Downloaded video file is empty.")
+    return str(path),info
 
 def energy_segments(video_path,count,duration=30):
     audio_path=str(Path(video_path).with_suffix(".analysis.wav"))
